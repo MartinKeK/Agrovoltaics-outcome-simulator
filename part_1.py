@@ -154,7 +154,7 @@ def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
                                            'dhi': weather_clear_sky['dhi'], 'albedo': albedo })
     
     #PV Parameters
-    
+    # This has to be writen in english 
 #    Aquí fijamos el Ground Coverage Ratio (grc), si la separación entre hileras fuese menor que
 #     la longitud del panel se fijaría en 1, si no se define como la relación entre la longitud del panel y 
 #     el espacio (distancia entre una hilera y otra). 
