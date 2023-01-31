@@ -104,11 +104,12 @@ def diffuse_correct(weather_df, dict_pv, inter_row_space, tilt_pv, azimuth_pv):
 
 def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
     
-    # Se comprueba que el diccionario con las coordenadas esté completo y se guardan las coordenadas.
+    # Check if coord dict is complete
      if isinstance(coor_pv, CoorPV) == False:
             raise Error("coor_pv must be a CoorPV instance")
    
-    # Justify this values
+    # In this case we're going to use the clear-sky model. The objetive of this part is cheking how pv modules will shade the ground and take an hourly factor of shading.
+    # We take a random year but taking in account the leap-year to have shading factor of February 29.   
     timezone = 'UTC'
     start_date = '01-01-2016'
     freq = "60min"
@@ -126,7 +127,7 @@ def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
     elif azimuth > -180 and azimuth < -90:
         azimuth_pvfactors = (azimuth - ((azimuth-90) * 2)) - 360
     else:
-        raise Error('It is mandatory to insert a aximuth value between -180 y 180')
+        raise Error('It is mandatory to insert a azimuth value between -180 y 180')
         
     # Get Metheorological data from a clearsky simulation
     site_for_shading = location.Location(latitude, longitude, tz=timezone)
@@ -135,7 +136,7 @@ def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
     weather_clear_sky = site_for_shading.get_clearsky(times)
     weather_clear_sky.index.name = "utc_time"
     
-    # Se obtiene la posición solar.
+    # Taking solar position angles.
     
     solpos_clear_sky = pvlib.solarposition.get_solarposition(
         time=weather_clear_sky.index,
@@ -146,7 +147,8 @@ def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
     )   
     
     
-    # DataFrame necesario para introducir en el pvfactors.
+
+    # We need this dataframe to introduce it in PvFactors framework 
     irradiance_for_shading = pd.DataFrame({'solar_zenith': solpos_clear_sky['zenith'], 
                                            'solar_azimuth': solpos_clear_sky['azimuth'], 
                                            'surface_tilt': tilt, 'surface_azimuth': azimuth_pvfactors, 
@@ -158,6 +160,7 @@ def shading_factors(tilt, azimuth, space, dict_pv, coor_pv, indice):
 #    Aquí fijamos el Ground Coverage Ratio (grc), si la separación entre hileras fuese menor que
 #     la longitud del panel se fijaría en 1, si no se define como la relación entre la longitud del panel y 
 #     el espacio (distancia entre una hilera y otra). 
+
     pv_height = dict_pv['Height']
     total_row_length = dict_pv['Length'] * dict_pv['Stacked']
     
