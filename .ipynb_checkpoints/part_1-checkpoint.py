@@ -14,8 +14,21 @@ class CoorPV():
 """
 def ground_spectrum(indice_weather, dict_coor): 
     
-    """Get hourly solar spectrum in the horizontal plane taking in account the index used in other functions and the coordinates needed to calculate the relative airmass."""
-               
+    """Get hourly solar spectrum in the horizontal plane taking in account the index used in other functions and the coordinates needed to calculate the relative airmass.
+      
+    Parameters
+    ----------
+    indice_weather: pandas.core.indexes.datetimes.DatetimeIndex
+        The DatetimeIndex of the selected weather data dataframe.
+    dict_coor: dict
+        Selected coordinates dictionary for the location.
+
+        
+    Returns
+    ---------
+    spectrum_normalized : pandas.DataFrame
+        Time-series of hourly data of the spectrum decomposed by wavelength.
+     """  
     # Location
     lat = dict_coor['Latitude']
     lon = dict_coor['Longitude']
