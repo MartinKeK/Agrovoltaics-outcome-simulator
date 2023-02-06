@@ -18,17 +18,21 @@ import numpy as np
 
 
 @dataclass
-class CoorPV:
+class Coor_PV:
     Latitude: float
     Longitude: float
     Name: str
     Altitude: float
+@dataclass
+class Ground_Dimensions():
+    Length: float
+    Width: float
 
     """                                      --------------------------------------------------------------- GROUND SPECTRUM FUNCTION -------------------------------------------------------------------------------------------------------------------
 """
 
 
-def ground_spectrum(indice_weather, dict_coor):
+def ground_spectrum(weather_index, coor_pv):
     """Get hourly solar spectrum in the horizontal plane taking in account the index used in other functions and the coordinates needed to calculate the relative airmass.
 
     Parameters
@@ -44,18 +48,14 @@ def ground_spectrum(indice_weather, dict_coor):
     spectrum_normalized : pandas.DataFrame
         Time-series of hourly data of the spectrum decomposed by wavelength.
     """
-    # Location
-    lat = dict_coor["Latitude"]
-    lon = dict_coor["Longitude"]
-    altitude = dict_coor["Altitude"]
-
+   
     # System geometric fixed for horizontal plane.
     tilt = 0
     azimuth = 180
 
     # Metheorological data
-    date_time_interval = indice_weather
-    solar_pos = solarposition.get_solarposition(date_time_interval, lat, lon)
+    date_time_interval = weather_index
+    solar_pos = solarposition.get_solarposition(date_time_interval, coor_pv.Latitude, coor_pv.Longitude)
     aoi = irradiance.aoi(tilt, azimuth, solar_pos.apparent_zenith, solar_pos.azimuth)
 
     # The technical report uses the 'kasten1966' airmass model, but later
@@ -63,7 +63,7 @@ def ground_spectrum(indice_weather, dict_coor):
     # for consistency with the technical report.
 
     # assumptions from the technical report:
-    pressure = atmosphere.alt2pres(altitude)
+    pressure = atmosphere.alt2pres(coor_pv.Altitude)
     water_vapor_content = 0.5  # (cm)
     tau500 = 0.1
     ozone = 0.31  # (atm-cm)
@@ -98,13 +98,17 @@ def ground_spectrum(indice_weather, dict_coor):
 """
 
 
-# ToDo Change l for something
+
 def diffuse_correct(weather_df, dict_pv, inter_row_space, tilt_pv, azimuth_pv):
     """Get hourly solar diffuse corrector. On the one hand, we have the diffuse in a plane, on the
     other hand, we have the diffuse resulted from a module shadow. If we compare both of them hourly, we
     can take the percent of diffuse that the system loses, depending on the solar position and geometry of
     the pv system.
     """
+    #The diffuse corrector will vary linearly depending on the day of the year, going 
+    #from a minimum in the winter months to a maximum reached in the summer months. 
+    #That's why the correction selected will be for the mid-day of each month.
+    
     day_in_middle = 15
     pv_height = dict_pv["Height"]
     total_row_length = dict_pv["Length"] * dict_pv["Stacked"]
@@ -115,12 +119,11 @@ def diffuse_correct(weather_df, dict_pv, inter_row_space, tilt_pv, azimuth_pv):
         ground_coverage_ratio = total_row_length / inter_row_space
 
     albedo = 0.2
-    # Explain WHY 15
     weather_average = weather_df.iloc[weather_df.index.day == day_in_middle]
     pvarray_parameters = {
         "n_pvrows": 20,  # number of pv rows
         "pvrow_height": pv_height,  # height of pvrows (measured at center / torque tube)
-        "pvrow_width": l,  # width of pvrows
+        "pvrow_width": dict_pv["Length"],  # width of pvrows
         "axis_azimuth": 90,  # azimuth angle of rotation axis
         "surface_azimuth": azimuth_pv,
         "surface_tilt": tilt_pv,
@@ -164,35 +167,26 @@ def diffuse_correct(weather_df, dict_pv, inter_row_space, tilt_pv, azimuth_pv):
 """
 
 
-def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
+def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, index):
     """Get hourly shading factors. With this function, we can get hourly the proportion of the ground that is shaded and unshaded depending on the geometry of the system and the moment of the year."""
 
     # Check if coord dict is complete
-    if isinstance(coor_pv, CoorPV) == False:
-        raise ArithmeticError("coor_pv must be a CoorPV instance")
+    # if isinstance(coor_pv, Coor_PV) == False:
+    #     raise ArithmeticError("coor_pv must be a CoorPV instance")
 
-    # In this case we're going to use the clear-sky model. The objetive of this part is cheking how pv modules will shade the ground and take an hourly factor of shading.
+    # In this case we're going to use the clear-sky model. The objetive of this part is cheking 
+    #how pv modules will shade the ground and take an hourly factor of shading.
     # We take a random year but taking in account the leap-year to have shading factor of February 29.
+    
     timezone = "UTC"
     start_date = "01-01-2016"
     freq = "60min"
     periods_in_a_year = 8784
     albedo = 0.2
 
-    # Adapt azimuth to pvfactors format
-    # ToDo move to function
-    if azimuth >= 0 and azimuth <= 90:
-        azimuth_pvfactors = azimuth + ((90 - azimuth) * 2)
-    elif azimuth > 90 and azimuth <= 180:
-        azimuth_pvfactors = azimuth - ((azimuth - 90) * 2)
-    elif azimuth < 0 and azimuth >= -90:
-        azimuth_pvfactors = (azimuth + ((90 - azimuth) * 2)) - 360
-    elif azimuth > -180 and azimuth < -90:
-        azimuth_pvfactors = (azimuth - ((azimuth - 90) * 2)) - 360
-    else:
-        raise ArithmeticError(
-            "It is mandatory to insert a azimuth value between -180 y 180"
-        )
+    # Adapt azimuth to pvfactors format using the function azimuth_conv.
+   
+    azimuth_pvfactors = azimuth_conv(azimuth)
 
     # Get Metheorological data from a clearsky simulation
 
@@ -247,7 +241,7 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
         "axis_azimuth": 90,
         "surface_azimuth": azimuth_pvfactors,
         "surface_tilt": tilt,
-        "pvrow_width": l,  # width of pvrows
+        "pvrow_width": total_row_length,  # width of pvrows
         "gcr": ground_coverage_ratio,  # ground coverage ratio
     }
 
@@ -318,7 +312,8 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
 
     # ------------------------------------------ GROUND SHADING FACTOR------------------------------------
 
-    # Now the percent of the ground shaded will be calculated. We are going to difference 2 parts of the ground. Shaded part and illuminated parts. This factor will say hourly the percent of each part.
+    # Now the percent of the ground shaded will be calculated. We are going to difference 2 parts of the ground. 
+    #Shaded part and illuminated parts. This factor will say hourly the percent of each part.
     # We are going to model in PvFactors a case with 30 rows.
     n_pv_rows = 30
     pvarray_parameters = {
@@ -327,7 +322,7 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
         "axis_azimuth": 90,
         "surface_azimuth": azimuth_pvfactors,
         "surface_tilt": tilt,
-        "pvrow_width": l,  # width of pvrows
+        "pvrow_width": total_row_length,  # width of pvrows
         "gcr": ground_coverage_ratio,  # ground coverage ratio
     }
 
@@ -357,7 +352,7 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
     # pvrows and we are going to check the parts that are illuminated and shaded.
     vec_meters = np.linspace(-100, 100, 200000)
     tilt_rad = math.radians(tilt)
-    lower_range = (l * math.cos(tilt_rad)) / 2
+    lower_range = (total_row_length * math.cos(tilt_rad)) / 2
     upper_range = inter_row_space
     ios = [lower_range, upper_range]
     ground_shading_factor = []
@@ -387,7 +382,7 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
     # Now we adapt this dataframe to the dataframe we use outside the function.
 
     shading_final_results = pd.DataFrame()
-    shading_final_results.index = indice
+    shading_final_results.index = index
 
     pv_shading_list = list()
     ground_shading_list = list()
@@ -422,14 +417,14 @@ def shading_factors(tilt, azimuth, inter_row_space, dict_pv, coor_pv, indice):
 def land_yield(
     tilt,
     azimuth,
-    space,
+    inter_row_space,
     dict_pv,
-    dict_coor,
-    dict_crop,
+    coor_pv,
+    ground_dim,
     is_spectrum,
     start_year,
     end_year,
-    spectral_out,
+    spectral_pv_trans ,
 ):
     """Get hourly RELLENAR ESTO CUANDO ESTEN TODOS LIMPIOS Y COMPROBAR QUE DA TODO!!!!
 
@@ -473,15 +468,15 @@ def land_yield(
 
     if dict_pv["PV_inverter"] == "Micro250W208V":
         sapm_inverters = pvsystem.retrieve_sam("cecinverter")
-        inverter = sapm_inverters["ABB__MICRO_0_25_I_OUTD_US_208__208V_"]
+        inverter_selected = sapm_inverters["ABB__MICRO_0_25_I_OUTD_US_208__208V_"]
 
     elif dict_pv["PV_inverter"] == "Micro300W240V":
         sapm_inverters = pvsystem.retrieve_sam("cecinverter")
-        inverter = sapm_inverters["ABB__MICRO_0_3HV_I_OUTD_US_240__240V_"]
+        inverter_selected = sapm_inverters["ABB__MICRO_0_3HV_I_OUTD_US_240__240V_"]
 
     elif dict_pv["PV_inverter"] == "Micro10KW480V":
         sapm_inverters = pvsystem.retrieve_sam("cecinverter")
-        inverter = sapm_inverters["ABB__PVI_10_0_I_OUTD_x_US_480_y_z__480V_"]
+        inverter_selected = sapm_inverters["ABB__PVI_10_0_I_OUTD_x_US_480_y_z__480V_"]
 
     else:
         raise Exception("Not Valid PV inverter")
@@ -495,17 +490,14 @@ def land_yield(
     # Location Data
     # First we check if coordinates are correct.
 
-    coor_key = ["Latitude", "Longitude", "Name", "Altitude"]
-    for key in coor_key:
-        if (key in dict_coor) == False:
-            print("No esta la clave " + key)
-
+    # if isinstance(coor_pv, Coor_PV) == False:
+    #     raise ArithmeticError("coor_pv must be a CoorPV instance")
     # Keep location data
 
-    latitude = dict_coor["Latitude"]
-    longitude = dict_coor["Longitude"]
-    name = dict_coor["Name"]
-    altitude = dict_coor["Altitude"]
+    # latitude = dict_coor["Latitude"]
+    # longitude = dict_coor["Longitude"]
+    # name = dict_coor["Name"]
+    # altitude = dict_coor["Altitude"]
     timezone = "UTC"
 
     #     The normal azimuth convention is 0 for south orientation. However, for pvlib south orientation is 180. Here, azimuth is adapted for pvlib.
@@ -517,8 +509,8 @@ def land_yield(
     # Obtain weather data from PVGIS database.
 
     weather = iotools.get_pvgis_hourly(
-        latitude,
-        longitude,
+        coor_pv.Latitude,
+        coor_pv.Longitude,
         start=start_year,
         end=end_year,
         url="https://re.jrc.ec.europa.eu/api/v5_2/",
@@ -540,11 +532,11 @@ def land_yield(
     # Solarposition from location data.
     solpos = solarposition.get_solarposition(
         time=weather.index,
-        latitude=latitude,
-        longitude=longitude,
-        altitude=altitude,
+        latitude=coor_pv.Latitude,
+        longitude=coor_pv.Longitude,
+        altitude=coor_pv.Altitude,
         temperature=weather["temp_air"],
-        pressure=atmosphere.alt2pres(altitude),
+        pressure=atmosphere.alt2pres(coor_pv.Altitude),
     )
     # Some interesting atmospheric properties are computed to enhance the calculation of the exact irradiance reaching the panel.
     dni_extra = irradiance.get_extra_radiation(
@@ -553,7 +545,7 @@ def land_yield(
     airmass = atmosphere.get_relative_airmass(
         solpos["apparent_zenith"]
     )  # Air mass passing by each ray.
-    pressure = atmosphere.alt2pres(altitude)
+    pressure = atmosphere.alt2pres(coor_pv.Altitude)
     am_abs = atmosphere.get_absolute_airmass(airmass, pressure)
     aoi = irradiance.aoi(
         tilt,
@@ -611,7 +603,7 @@ def land_yield(
 
     # Here, shading losses between rows are applied and shading factors are calculated between two rows and between the panel and the ground.
     (shading_factors_output, diffuse_corrector) = shading_factors(
-        tilt, azimuth, space, dict_pv, dict_coor, total_irradiance.index
+        tilt, azimuth, inter_row_space, dict_pv, coor_pv, total_irradiance.index
     )
     total_irradiance["poa_direct"] = total_irradiance["poa_direct"] * (
         1 - shading_factors_output["PV_Shading_Factor"]
@@ -629,7 +621,7 @@ def land_yield(
     # Calculate dc and ac power generated for one module.
 
     info_pv_dc = pvsystem.sapm(effective_irradiance, cell_temperature, module)
-    info_pv_ac = inverter.sandia(info_pv_dc["v_mp"], info_pv_dc["p_mp"], inverter)
+    # info_pv_ac = inverter.sandia(info_pv_dc["v_mp"], info_pv_dc["p_mp"], inverter_selected)
 
     # Based on the geometry of the system, a calculation will be performed to determine the number of panels that can be installed and, as a result, the total power they will generate collectively.
 
@@ -638,23 +630,38 @@ def land_yield(
         if (key in dict_pv) == False:
             raise KeyError("No esta la clave " + key)
 
+    
+    """
+    portrait                   landscape
+    
+      w_pv                           w_pv                                          
+    - - - - - --              -----------------
+    -          -              -               -
+    -          -              -               -
+    -          -   l_pv       -               -  l_pv
+    -          -              -               -
+    -          -              -----------------
+    - - - - - -- 
+                                                                                                                                                                                             
+                                                                        
+    """                                                                 
     w_pv = dict_pv["Width"]
     l_pv = dict_pv["Length"]
 
-    l_crop = dict_crop["Length"]
-    w_crop = dict_crop["Width"]
+    l_ground = ground_dim.Length
+    w_ground = ground_dim.Width
     tilt_rad = math.radians(tilt)
-    distance_condition = space
+    distance_condition = inter_row_space
     if (
         distance_condition < 1.25
     ):  # A minimum distance of 1.25 meters between rows is always set due to design conditions.
         space_final = 1.25
     else:
-        space_final = space
+        space_final = inter_row_space
 
     correction_per_row = 4  # 4 meters
-    pv_per_row = ((w_crop - correction_per_row) / w_pv) * dict_pv["Stacked"]
-    n_rows = int(l_crop / (space_final)) + 1
+    pv_per_row = ((w_ground - correction_per_row) / w_pv) * dict_pv["Stacked"]
+    n_rows = int(l_ground / (space_final)) + 1
     n_pv = n_rows * pv_per_row
     MW2W = 1000000  # Conversion from MW (megawatts) to W (watts)
 
@@ -682,9 +689,8 @@ def land_yield(
     print("Potencia Dssc (MWh): ", P_dc_dssc)
     print("Número de paneles: ", n_pv)
     print("Número de hileras: ", n_rows)
-    print("Densidad de paneles (%):", (l_pv / space) * 100)
-    print("Hectáreas:", (l_crop * w_crop) / 10000)
-    #     --------------- "Irradiance and Spectrum Reaching the Ground for Conventional Cells" ---------------------
+    print("Densidad de paneles (%):", (l_pv / inter_row_space) * 100)
+    print("Hectáreas:", (l_ground * w_ground) / 10000)
     zenith_rad = (solpos.zenith) * (math.pi / 180)
     cos_zenith = np.cos(zenith_rad)
     # Total Diffuse irradiance
@@ -715,6 +721,10 @@ def land_yield(
     ) * df_keeper.corrector
     dhi_clear_col = dhi_col * (1 - shading_factors_output.Ground_Shading_Factor)
 
+    #"True" if you want to obtain the total hourly irradiance that reaches
+    #the ground in its spectral decomposition / 
+    #"False" to only obtain the total annual electric power output.
+    
     if is_spectrum:
         A = np.array([[]] * len(results) + [[1]])[:-1]
         # results['clear_spectrum'] = A
@@ -763,13 +773,13 @@ def land_yield(
         """
 
         results["dni_spectrum_col_conv"] = (
-            spectral_out["clear_spectrum"] * dni_clear_col
-            + spectral_out["shaded_spectrum_conv"] * dni_shaded_col
+            spectral_pv_trans["clear_spectrum"] * dni_clear_col
+            + spectral_pv_trans["shaded_spectrum_conv"] * dni_shaded_col
         )
         results["dhi_spectrum_col_conv"] = (
-            spectral_out["clear_spectrum"] * dhi_clear_col
-            + spectral_out["clear_spectrum"] * dhi_shaded_col
-            + spectral_out["shaded_spectrum_conv"] * dhi_shaded_col_placa
+            spectral_pv_trans["clear_spectrum"] * dhi_clear_col
+            + spectral_pv_trans["clear_spectrum"] * dhi_shaded_col
+            + spectral_pv_trans["shaded_spectrum_conv"] * dhi_shaded_col_placa
         )
         results["ghi_spectrum_col_conv"] = (
             results["dni_spectrum_col_conv"] * cos_zenith
@@ -777,24 +787,50 @@ def land_yield(
         )
 
         results["dni_spectrum_col_dssc"] = (
-            spectral_out["clear_spectrum"] * dni_clear_col
-            + spectral_out["shaded_spectrum_dssc"] * dni_shaded_col
+            spectral_pv_trans["clear_spectrum"] * dni_clear_col
+            + spectral_pv_trans["shaded_spectrum_dssc"] * dni_shaded_col
         )
         results["dhi_spectrum_col_dssc"] = (
-            spectral_out["clear_spectrum"] * dhi_clear_col
-            + spectral_out["clear_spectrum"] * dhi_shaded_col
-            + spectral_out["shaded_spectrum_dssc"] * dhi_shaded_col_placa
+            spectral_pv_trans["clear_spectrum"] * dhi_clear_col
+            + spectral_pv_trans["clear_spectrum"] * dhi_shaded_col
+            + spectral_pv_trans["shaded_spectrum_dssc"] * dhi_shaded_col_placa
         )
-        # results['dhi_spectrum_col_dssc'] = spectral_out['clear_spectrum'] * dhi_col
+        # results['dhi_spectrum_col_dssc'] = spectral_pv_trans['clear_spectrum'] * dhi_col
         results["ghi_spectrum_col_dssc"] = (
             results["dni_spectrum_col_dssc"] * cos_zenith
             + results["dhi_spectrum_col_dssc"]
         )
 
         results["open_field_spectrum"] = (
-            spectral_out["clear_spectrum"] * horizontal_irradiance["ghi"]
+            spectral_pv_trans["clear_spectrum"] * horizontal_irradiance["ghi"]
         )
 
     # Outputs
     return P_dc_conv, P_dc_dssc, results
     # return results
+    
+    
+    
+    
+    
+    
+    
+    """ 
+    -----------------------AZIMUTH PVLIB TO PVFACTORS-----------------------
+    """
+def azimuth_conv(azimuth):
+        
+    if azimuth >= 0 and azimuth <= 90:
+        azimuth_pvfactors = azimuth + ((90 - azimuth) * 2)
+    elif azimuth > 90 and azimuth <= 180:
+        azimuth_pvfactors = azimuth - ((azimuth - 90) * 2)
+    elif azimuth < 0 and azimuth >= -90:
+        azimuth_pvfactors = (azimuth + ((90 - azimuth) * 2)) - 360
+    elif azimuth > -180 and azimuth < -90:
+        azimuth_pvfactors = (azimuth - ((azimuth - 90) * 2)) - 360
+    else:
+        raise ArithmeticError(
+            "It is mandatory to insert a azimuth value between -180 y 180"
+        )
+    return azimuth_pvfactors
+
