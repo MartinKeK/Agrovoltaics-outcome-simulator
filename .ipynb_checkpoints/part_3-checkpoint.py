@@ -1,17 +1,7 @@
-def crop_simulation(crop_name, PAR_results, dict_coor):
 
-    # Define Location
-
-    coor_key = ["Latitude", "Longitude", "Name", "Altitude"]
-    for key in coor_key:
-        if (key in dict_coor) == False:
-            print("No esta la clave " + key)
-
-    latitude = dict_coor["Latitude"]
-    longitude = dict_coor["Longitude"]
-
-    # Define Crops Calendar
-
+import yaml
+import pcse
+def get_agro_info(crop_name, PAR_results):
     crop_year_int = PAR_results.index[1].year
     crop_year_str = str(crop_year_int)
 
@@ -57,9 +47,9 @@ def crop_simulation(crop_name, PAR_results, dict_coor):
         harvest_date = "xxxx-09-15"
         harvest_date = harvest_date.replace("xxxx", crop_year_str)
         max_duration = 180
-
+    else:
+        raise KeyError("Crop Name invalid")
     # Here we define the agromanagement for the selected crop
-    import yaml
 
     agro_yaml = """
     - {start}:
@@ -81,29 +71,35 @@ def crop_simulation(crop_name, PAR_results, dict_coor):
         enddate=harvest_date,
         maxdur=max_duration,
     )
-    agro = yaml.safe_load(agro_yaml)
-    # print(agro_yaml)
+    return yaml.safe_load(agro_yaml)
+
+def crop_simulation(agro_yaml, PAR_results, coor_pv):
+    # Define Location
+
+    # Define Crops Calendar
+    
+        # print(agro_yaml)
 
     # Weather
-    wdp = NASAPowerWeatherDataProvider(
-        latitude=latitude, longitude=longitude, force_update=False, ETmodel="PM"
+    wdp = pcse.db.NASAPowerWeatherDataProvider(
+        latitude=coor_pv.Latitude, longitude=coor_pv.Longitude, force_update=False, ETmodel="PM"
     )
 
     # Parameter sets for crop, soil and site
     # Standard crop parameter library
-    cropd = YAMLCropDataProvider()
+    cropd = pcse.fileinput.YAMLCropDataProvider()
     # We don't need soil for potential production, so we use dummy values
-    soild = DummySoilDataProvider()
+    soild = pcse.util.DummySoilDataProvider()
     # Some site parameters
-    sited = WOFOST72SiteDataProvider(WAV=50, CO2=360.0)
+    sited = pcse.util.WOFOST72SiteDataProvider(WAV=50, CO2=360.0)
 
     # Retrieve all parameters in the form of a single object.
     # In order to see all parameters for the selected crop already, we
     # synchronise data provider cropd with the crop/variety:
-    firstkey = list(agro[0])[0]
-    cropcalendar = agro[0][firstkey]["CropCalendar"]
+    firstkey = list(agro_yaml[0])[0]
+    cropcalendar = agro_yaml[0][firstkey]["CropCalendar"]
     cropd.set_active_crop(cropcalendar["crop_name"], cropcalendar["variety_name"])
-    params = ParameterProvider(cropdata=cropd, sitedata=sited, soildata=soild)
+    params = pcse.base.ParameterProvider(cropdata=cropd, sitedata=sited, soildata=soild)
 
     # Open-field calculation. This part is necessary to be able to compare the crop production in open field versus other shaded conditions.
 
@@ -113,7 +109,7 @@ def crop_simulation(crop_name, PAR_results, dict_coor):
             "PAR_absorption_tot_of"
         ][counter_of]
 
-    wfpp = Wofost71_PP(params, wdp_of, agro)
+    wfpp = pcse.models.Wofost71_PP(params, wdp_of, agro_yaml)
     wfpp.run_till_terminate()
     summary_output = wfpp.get_summary_output()
 
@@ -141,8 +137,8 @@ def crop_simulation(crop_name, PAR_results, dict_coor):
             "PAR_absorption_tot_conv"
         ][counter_conv]
 
-    wfpp = Wofost72_PP(
-        params, wdp_conv, agro
+    wfpp = pcse.models.Wofost72_PP(
+        params, wdp_conv, agro_yaml
     )  # Wofost72_PP (potencial production). It only takes into account the effect of irradiance, assuming that the other parameters that influence growth are always optimal. This way, we can compare the different results while only considering the irradiance, which is what is being investigated in this case.
     wfpp.run_till_terminate()
     summary_output = wfpp.get_summary_output()
@@ -156,7 +152,7 @@ def crop_simulation(crop_name, PAR_results, dict_coor):
             "PAR_absorption_tot_dssc"
         ][counter_dssc]
 
-    wfpp = Wofost72_PP(params, wdp_dssc, agro)
+    wfpp = pcse.models.Wofost72_PP(params, wdp_dssc, agro_yaml)
     wfpp.run_till_terminate()
     summary_output = wfpp.get_summary_output()
 

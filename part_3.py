@@ -73,16 +73,8 @@ def get_agro_info(crop_name, PAR_results):
     )
     return yaml.safe_load(agro_yaml)
 
-def crop_simulation(agro_yaml, PAR_results, dict_coor):
+def crop_simulation(agro_yaml, PAR_results, coor_pv):
     # Define Location
-
-    coor_key = ["Latitude", "Longitude", "Name", "Altitude"]
-    for key in coor_key:
-        if (key in dict_coor) == False:
-            raise KeyError("No esta la clave " + key)
-
-    latitude = dict_coor["Latitude"]
-    longitude = dict_coor["Longitude"]
 
     # Define Crops Calendar
     
@@ -90,7 +82,7 @@ def crop_simulation(agro_yaml, PAR_results, dict_coor):
 
     # Weather
     wdp = pcse.db.NASAPowerWeatherDataProvider(
-        latitude=latitude, longitude=longitude, force_update=False, ETmodel="PM"
+        latitude=coor_pv.Latitude, longitude=coor_pv.Longitude, force_update=False, ETmodel="PM"
     )
 
     # Parameter sets for crop, soil and site
